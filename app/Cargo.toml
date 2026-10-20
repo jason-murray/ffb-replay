@@ -1,0 +1,19 @@
+[package]
+name = "ffb-replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Record and play back force-feedback signals, with a live graph."
+default-run = "ffb-replay"
+
+[[bin]]
+name = "ffb-replay"
+path = "src/main.rs"
+
+[dependencies]
+ffb-replay-core = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ffb-replay-linux = { workspace = true }

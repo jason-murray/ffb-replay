@@ -1,0 +1,11 @@
+[package]
+name = "ffb-replay-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Linux backends for ffb-replay: a uinput virtual wheel (FFB source) and an evdev wheel (FFB sink)."
+
+[dependencies]
+ffb-replay-core = { workspace = true }

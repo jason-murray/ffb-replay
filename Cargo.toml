@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ffb-replay-core",
+    "crates/ffb-replay-linux",
+    "app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/jason-murray/ffb-replay"
+rust-version = "1.75"
+
+[workspace.dependencies]
+ffb-replay-core = { path = "crates/ffb-replay-core" }
+ffb-replay-linux = { path = "crates/ffb-replay-linux" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

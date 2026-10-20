@@ -1,0 +1,17 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Recordings made while developing (keep fixtures under crates/*/tests)
+/recordings/
+*.ffbr
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Claude Code agent worktrees
+.claude/worktrees/
