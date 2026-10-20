@@ -144,7 +144,9 @@ impl Renderer {
                 match slot {
                     // Parameter update on a live effect keeps its clock.
                     Some(s) => s.effect = effect,
-                    None => *slot = Some(Slot { effect, playing: false, started_us: now, count: 1 }),
+                    None => {
+                        *slot = Some(Slot { effect, playing: false, started_us: now, count: 1 })
+                    }
                 }
             }
             FfbEvent::Erase { id } => {
@@ -258,7 +260,8 @@ impl Renderer {
                     } else {
                         waveform.eval(phase + local_ms / period_ms as f32)
                     };
-                    out.periodic += (clamp_signed(offset) + clamp_signed(magnitude) * env * wave) * x;
+                    out.periodic +=
+                        (clamp_signed(offset) + clamp_signed(magnitude) * env * wave) * x;
                 }
                 EffectKind::Condition { kind, axes } => {
                     if let Some(a) = axis {
@@ -283,7 +286,8 @@ impl Renderer {
         out.periodic *= g;
         out.condition *= g;
         out.rumble *= g;
-        out.total = clamp_signed(out.constant + out.ramp + out.periodic + out.condition + out.rumble);
+        out.total =
+            clamp_signed(out.constant + out.ramp + out.periodic + out.condition + out.rumble);
         out
     }
 }
@@ -390,7 +394,10 @@ mod tests {
     #[test]
     fn direction_flips_sign() {
         let mut r = Renderer::new();
-        r.apply(&FfbEvent::Upload { id: 0, effect: Effect::constant(1.0).with_direction(270.0) }, 0);
+        r.apply(
+            &FfbEvent::Upload { id: 0, effect: Effect::constant(1.0).with_direction(270.0) },
+            0,
+        );
         r.apply(&FfbEvent::Play { id: 0, count: 1 }, 0);
         assert!((r.sample(100, None).total + 1.0).abs() < 1e-6);
     }
@@ -410,7 +417,10 @@ mod tests {
     #[test]
     fn finite_duration_retires_the_effect() {
         let mut r = Renderer::new();
-        r.apply(&FfbEvent::Upload { id: 1, effect: Effect::constant(1.0).with_duration(Some(100)) }, 0);
+        r.apply(
+            &FfbEvent::Upload { id: 1, effect: Effect::constant(1.0).with_duration(Some(100)) },
+            0,
+        );
         r.apply(&FfbEvent::Play { id: 1, count: 1 }, 0);
         assert!(r.sample(50_000, None).total > 0.99);
         assert_eq!(r.sample(100_000, None).total, 0.0);
@@ -452,8 +462,12 @@ mod tests {
     #[test]
     fn ramp_interpolates_over_duration() {
         let mut r = Renderer::new();
-        let e = Effect::with_kind(EffectKind::Ramp { start: -1.0, end: 1.0, envelope: Envelope::default() })
-            .with_duration(Some(1000));
+        let e = Effect::with_kind(EffectKind::Ramp {
+            start: -1.0,
+            end: 1.0,
+            envelope: Envelope::default(),
+        })
+        .with_duration(Some(1000));
         r.apply(&FfbEvent::Upload { id: 1, effect: e }, 0);
         r.apply(&FfbEvent::Play { id: 1, count: 1 }, 0);
         assert!((r.sample(0, None).total + 1.0).abs() < 1e-6);
@@ -483,8 +497,17 @@ mod tests {
     #[test]
     fn spring_restores_towards_centre() {
         let mut r = Renderer::new();
-        let axis = Condition { right_coeff: 1.0, left_coeff: 1.0, right_sat: 1.0, left_sat: 1.0, ..Default::default() };
-        let e = Effect::with_kind(EffectKind::Condition { kind: ConditionKind::Spring, axes: [axis, axis] });
+        let axis = Condition {
+            right_coeff: 1.0,
+            left_coeff: 1.0,
+            right_sat: 1.0,
+            left_sat: 1.0,
+            ..Default::default()
+        };
+        let e = Effect::with_kind(EffectKind::Condition {
+            kind: ConditionKind::Spring,
+            axes: [axis, axis],
+        });
         r.apply(&FfbEvent::Upload { id: 1, effect: e }, 0);
         r.apply(&FfbEvent::Play { id: 1, count: 1 }, 0);
         let right = r.sample(0, Some(AxisState { position: 0.5, velocity: 0.0 }));
@@ -497,28 +520,51 @@ mod tests {
 
     #[test]
     fn spring_deadband_and_saturation() {
-        let c = Condition { deadband: 0.1, right_coeff: 1.0, left_coeff: 1.0, right_sat: 0.3, left_sat: 0.3, ..Default::default() };
-        assert_eq!(condition_force(ConditionKind::Spring, &c, AxisState { position: 0.05, velocity: 0.0 }), 0.0);
-        let f = condition_force(ConditionKind::Spring, &c, AxisState { position: 0.2, velocity: 0.0 });
+        let c = Condition {
+            deadband: 0.1,
+            right_coeff: 1.0,
+            left_coeff: 1.0,
+            right_sat: 0.3,
+            left_sat: 0.3,
+            ..Default::default()
+        };
+        assert_eq!(
+            condition_force(ConditionKind::Spring, &c, AxisState { position: 0.05, velocity: 0.0 }),
+            0.0
+        );
+        let f =
+            condition_force(ConditionKind::Spring, &c, AxisState { position: 0.2, velocity: 0.0 });
         assert!((f + 0.1).abs() < 1e-6, "{f}");
-        let f = condition_force(ConditionKind::Spring, &c, AxisState { position: 1.0, velocity: 0.0 });
+        let f =
+            condition_force(ConditionKind::Spring, &c, AxisState { position: 1.0, velocity: 0.0 });
         assert!((f + 0.3).abs() < 1e-6, "saturates: {f}");
     }
 
     #[test]
     fn damper_and_friction_oppose_velocity() {
         let c = Condition { right_coeff: 0.5, left_coeff: 0.5, ..Default::default() };
-        let f = condition_force(ConditionKind::Damper, &c, AxisState { position: 0.0, velocity: 1.0 });
+        let f =
+            condition_force(ConditionKind::Damper, &c, AxisState { position: 0.0, velocity: 1.0 });
         assert!((f + 0.5).abs() < 1e-6);
-        let f = condition_force(ConditionKind::Friction, &c, AxisState { position: 0.0, velocity: -3.0 });
+        let f = condition_force(
+            ConditionKind::Friction,
+            &c,
+            AxisState { position: 0.0, velocity: -3.0 },
+        );
         assert!((f - 0.5).abs() < 1e-6);
-        assert_eq!(condition_force(ConditionKind::Inertia, &c, AxisState { position: 0.0, velocity: 1.0 }), 0.0);
+        assert_eq!(
+            condition_force(ConditionKind::Inertia, &c, AxisState { position: 0.0, velocity: 1.0 }),
+            0.0
+        );
     }
 
     #[test]
     fn pause_freezes_and_continue_resumes_timeline() {
         let mut r = Renderer::new();
-        r.apply(&FfbEvent::Upload { id: 1, effect: Effect::constant(1.0).with_duration(Some(100)) }, 0);
+        r.apply(
+            &FfbEvent::Upload { id: 1, effect: Effect::constant(1.0).with_duration(Some(100)) },
+            0,
+        );
         r.apply(&FfbEvent::Play { id: 1, count: 1 }, 0);
         r.apply(&FfbEvent::Control(DeviceControl::Pause), 50_000);
         let s = r.sample(500_000, None);

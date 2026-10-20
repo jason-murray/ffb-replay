@@ -42,7 +42,14 @@ impl Player {
             records,
             duration_us,
             name: name.into(),
-            options: PlayerOptions { speed: if options.speed.is_finite() && options.speed > 0.0 { options.speed } else { 1.0 }, ..options },
+            options: PlayerOptions {
+                speed: if options.speed.is_finite() && options.speed > 0.0 {
+                    options.speed
+                } else {
+                    1.0
+                },
+                ..options
+            },
             next: 0,
             origin: None,
             paused_at_us: None,
@@ -125,7 +132,8 @@ impl FfbSource for Player {
             (true, None) => self.paused_at_us = Some(self.position_us()),
             (false, Some(p)) => {
                 // Move the origin so the timeline resumes from `p`.
-                let back = std::time::Duration::from_secs_f64(p as f64 / 1e6 / self.options.speed as f64);
+                let back =
+                    std::time::Duration::from_secs_f64(p as f64 / 1e6 / self.options.speed as f64);
                 self.origin = Instant::now().checked_sub(back);
                 if self.origin.is_none() {
                     self.restart();
@@ -153,7 +161,13 @@ mod tests {
         Recording {
             header: Header::default(),
             records: vec![
-                Record { t_us: 0, body: RecordBody::Ffb(FfbEvent::Upload { id: 1, effect: Effect::constant(0.3) }) },
+                Record {
+                    t_us: 0,
+                    body: RecordBody::Ffb(FfbEvent::Upload {
+                        id: 1,
+                        effect: Effect::constant(0.3),
+                    }),
+                },
                 Record { t_us: 0, body: RecordBody::Ffb(FfbEvent::Play { id: 1, count: 1 }) },
                 Record { t_us: 20_000, body: RecordBody::Axis(0.4) },
                 Record { t_us: 40_000, body: RecordBody::Ffb(FfbEvent::Stop { id: 1 }) },
@@ -183,7 +197,11 @@ mod tests {
         p.poll(&mut out).unwrap();
         sleep(Duration::from_millis(15));
         out.clear();
-        assert_eq!(p.poll(&mut out).unwrap(), SourceStatus::Finished, "40 ms of recording in ~10 ms wall time");
+        assert_eq!(
+            p.poll(&mut out).unwrap(),
+            SourceStatus::Finished,
+            "40 ms of recording in ~10 ms wall time"
+        );
     }
 
     #[test]

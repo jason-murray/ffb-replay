@@ -36,7 +36,10 @@ impl Default for PipelineConfig {
 /// Instructions from the owner.
 pub enum Command {
     /// Begin writing a recording to `out`. `notes` goes in the header.
-    StartRecording { out: Box<dyn Write + Send>, notes: String },
+    StartRecording {
+        out: Box<dyn Write + Send>,
+        notes: String,
+    },
     StopRecording,
     /// Pause or resume the source (playback only).
     SetPaused(bool),
@@ -106,7 +109,11 @@ impl Pipeline {
         Pipeline {
             source,
             sink,
-            config: PipelineConfig { tick_hz: config.tick_hz.clamp(50, 10_000), sample_every: config.sample_every.max(1), ..config },
+            config: PipelineConfig {
+                tick_hz: config.tick_hz.clamp(50, 10_000),
+                sample_every: config.sample_every.max(1),
+                ..config
+            },
             renderer: Renderer::new(),
             recorder: None,
             last_recorded: None,
@@ -125,9 +132,17 @@ impl Pipeline {
         self.sink.name()
     }
 
-    fn start_recording(&mut self, out: Box<dyn Write + Send>, notes: String, now_us: u64) -> Result<(), String> {
+    fn start_recording(
+        &mut self,
+        out: Box<dyn Write + Send>,
+        notes: String,
+        now_us: u64,
+    ) -> Result<(), String> {
         let header = Header {
-            created_unix: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+            created_unix: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
             source: self.source.name(),
             sink: self.sink.name(),
             tick_hz: self.config.tick_hz,
@@ -136,7 +151,8 @@ impl Pipeline {
         };
         let mut initial = Vec::new();
         self.renderer.snapshot(&mut initial);
-        let rec = Recorder::start(out, &header, now_us, &initial, self.config.axis_sample_hz).map_err(|e| e.to_string())?;
+        let rec = Recorder::start(out, &header, now_us, &initial, self.config.axis_sample_hz)
+            .map_err(|e| e.to_string())?;
         self.recorder = Some(rec);
         Ok(())
     }
@@ -188,7 +204,9 @@ impl Pipeline {
                     Ok(Command::StartRecording { out, notes }) => {
                         if self.recorder.is_none() {
                             if let Err(e) = self.start_recording(out, notes, now_us) {
-                                break 'run Outcome::Error(format!("could not start recording: {e}"));
+                                break 'run Outcome::Error(format!(
+                                    "could not start recording: {e}"
+                                ));
                             }
                         }
                     }
@@ -205,7 +223,9 @@ impl Pipeline {
                     }
                     Ok(Command::Stop) => break 'run Outcome::Stopped,
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break 'run Outcome::Stopped,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        break 'run Outcome::Stopped
+                    }
                 }
             }
 
@@ -347,7 +367,11 @@ mod tests {
         let source = ScriptedSource::new(script(), 1000, false);
         let (cmd_tx, cmd_rx) = channel();
         let (s_tx, s_rx) = sync_channel(1024);
-        let p = Pipeline::new(Box::new(source), Box::new(CaptureSink::effects()), PipelineConfig::default());
+        let p = Pipeline::new(
+            Box::new(source),
+            Box::new(CaptureSink::effects()),
+            PipelineConfig::default(),
+        );
         // Keep the sender alive on this side so the pipeline is not stopped by a drop.
         let _keep = cmd_tx;
         let summary = p.run(cmd_rx, s_tx);
@@ -379,7 +403,11 @@ mod tests {
     fn stop_command_ends_the_loop() {
         let (cmd_tx, cmd_rx) = channel();
         let (s_tx, _s_rx) = sync_channel(16);
-        let p = Pipeline::new(Box::new(crate::io::IdleSource), Box::new(NullSink::default()), PipelineConfig::default());
+        let p = Pipeline::new(
+            Box::new(crate::io::IdleSource),
+            Box::new(NullSink::default()),
+            PipelineConfig::default(),
+        );
         cmd_tx.send(Command::Stop).unwrap();
         let summary = p.run(cmd_rx, s_tx);
         assert_eq!(summary.outcome, Outcome::Stopped);
@@ -394,7 +422,11 @@ mod tests {
         let mut script = script();
         script.push((60_000, FfbEvent::Play { id: 1, count: 1 }));
         script.push((80_000, FfbEvent::Stop { id: 1 }));
-        let p = Pipeline::new(Box::new(ScriptedSource::new(script, 1000, false)), Box::new(NullSink::default()), PipelineConfig::default());
+        let p = Pipeline::new(
+            Box::new(ScriptedSource::new(script, 1000, false)),
+            Box::new(NullSink::default()),
+            PipelineConfig::default(),
+        );
         let out: Box<dyn Write + Send> = Box::new(Shared(buf.clone()));
         let handle = std::thread::spawn(move || p.run(cmd_rx, s_tx));
         // Wait until the effect is live, then start recording.
@@ -416,24 +448,40 @@ mod tests {
         assert_eq!(rec.header.notes, "test");
         assert_eq!(rec.header.tick_hz, 1000);
         // Snapshot at t=0 carries the already-playing effect.
-        assert!(matches!(rec.records[0].body, crate::format::RecordBody::Ffb(FfbEvent::Upload { id: 1, .. })));
-        assert!(matches!(rec.records[1].body, crate::format::RecordBody::Ffb(FfbEvent::Play { id: 1, .. })));
+        assert!(matches!(
+            rec.records[0].body,
+            crate::format::RecordBody::Ffb(FfbEvent::Upload { id: 1, .. })
+        ));
+        assert!(matches!(
+            rec.records[1].body,
+            crate::format::RecordBody::Ffb(FfbEvent::Play { id: 1, .. })
+        ));
 
         // Play it back through a fresh pipeline and compare the rendered force at a few points.
         let player = Player::new(rec, "mem", PlayerOptions::default());
         let (_cmd_tx2, cmd_rx2) = channel();
         let (s_tx2, s_rx2) = sync_channel(4096);
-        let p2 = Pipeline::new(Box::new(player), Box::new(NullSink::default()), PipelineConfig::default());
+        let p2 = Pipeline::new(
+            Box::new(player),
+            Box::new(NullSink::default()),
+            PipelineConfig::default(),
+        );
         let summary2 = p2.run(cmd_rx2, s_tx2);
         assert_eq!(summary2.outcome, Outcome::SourceFinished);
         let replayed: Vec<Sample> = s_rx2.try_iter().collect();
         assert!(replayed.len() >= 60, "{}", replayed.len());
         let first = replayed.iter().find(|s| s.t_us >= 2_000).unwrap();
         assert!((first.rendered.total - 0.25).abs() < 1e-6, "{first:?}");
-        let at = |samples: &[Sample], t: u64| samples.iter().find(|s| s.t_us >= t).map(|s| s.rendered.total).unwrap();
+        let at = |samples: &[Sample], t: u64| {
+            samples.iter().find(|s| s.t_us >= t).map(|s| s.rendered.total).unwrap()
+        };
         // Live timeline is offset by the recording start (~5 ms); compare steady-state windows.
         assert!((at(&replayed, 15_000) - at(&live, 15_000 + 5_000)).abs() < 1e-6);
-        assert!((at(&replayed, 65_000) + 0.25).abs() < 1e-6, "second play after gain 0.5: {}", at(&replayed, 65_000));
+        assert!(
+            (at(&replayed, 65_000) + 0.25).abs() < 1e-6,
+            "second play after gain 0.5: {}",
+            at(&replayed, 65_000)
+        );
         assert_eq!(replayed.last().unwrap().rendered.total, 0.0);
     }
 
@@ -453,7 +501,11 @@ mod tests {
         }
         let (_cmd_tx, cmd_rx) = channel();
         let (s_tx, _s_rx) = sync_channel(16);
-        let p = Pipeline::new(Box::new(ScriptedSource::new(script(), 1000, false)), Box::new(Dead), PipelineConfig::default());
+        let p = Pipeline::new(
+            Box::new(ScriptedSource::new(script(), 1000, false)),
+            Box::new(Dead),
+            PipelineConfig::default(),
+        );
         let summary = p.run(cmd_rx, s_tx);
         assert_eq!(summary.outcome, Outcome::Error("sink: unplugged".into()));
     }

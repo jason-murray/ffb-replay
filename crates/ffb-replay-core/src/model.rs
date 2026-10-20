@@ -44,7 +44,7 @@ impl Waveform {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_name(s: &str) -> Option<Self> {
         Some(match s {
             "sine" => Waveform::Sine,
             "square" => Waveform::Square,
@@ -106,7 +106,7 @@ impl ConditionKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_name(s: &str) -> Option<Self> {
         Some(match s {
             "spring" => ConditionKind::Spring,
             "damper" => ConditionKind::Damper,
@@ -190,10 +190,7 @@ pub enum EffectKind {
     },
     /// Gamepad-style rumble, `0.0..=1.0` per motor. Rendered as a constant
     /// magnitude for the plot.
-    Rumble {
-        strong: f32,
-        weak: f32,
-    },
+    Rumble { strong: f32, weak: f32 },
 }
 
 impl EffectKind {
@@ -237,7 +234,10 @@ impl Effect {
     /// A wheel-shaped constant force: direction +X, infinite, no envelope.
     pub fn constant(magnitude: f32) -> Self {
         Effect {
-            kind: EffectKind::Constant { magnitude: clamp_signed(magnitude), envelope: Envelope::default() },
+            kind: EffectKind::Constant {
+                magnitude: clamp_signed(magnitude),
+                envelope: Envelope::default(),
+            },
             duration_ms: None,
             delay_ms: 0,
             direction_deg: 90.0,
@@ -294,7 +294,7 @@ impl DeviceControl {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_name(s: &str) -> Option<Self> {
         Some(match s {
             "reset" => DeviceControl::Reset,
             "pause" => DeviceControl::Pause,
@@ -317,14 +317,24 @@ pub enum FfbEvent {
     /// Create or replace the effect in slot `id`. Updating a playing
     /// effect's parameters keeps it playing (PID "set effect report" while
     /// running), which is how games animate a constant force.
-    Upload { id: EffectId, effect: Effect },
+    Upload {
+        id: EffectId,
+        effect: Effect,
+    },
     /// Free slot `id`.
-    Erase { id: EffectId },
+    Erase {
+        id: EffectId,
+    },
     /// Start slot `id`; `count` repetitions of its duration (`0` = infinite
     /// repeats, meaningful only with a finite duration).
-    Play { id: EffectId, count: u32 },
+    Play {
+        id: EffectId,
+        count: u32,
+    },
     /// Stop slot `id`.
-    Stop { id: EffectId },
+    Stop {
+        id: EffectId,
+    },
     /// Device gain, `0.0..=1.0`.
     Gain(f32),
     /// Autocentre strength, `0.0..=1.0`. Rendered as a spring.
@@ -352,8 +362,14 @@ impl FfbEvent {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InputEvent {
     /// Absolute axis, value normalised to `-1.0..=1.0`.
-    Axis { code: u16, value: f32 },
-    Button { code: u16, pressed: bool },
+    Axis {
+        code: u16,
+        value: f32,
+    },
+    Button {
+        code: u16,
+        pressed: bool,
+    },
 }
 
 /// Clamp into `-1.0..=1.0`, mapping non-finite values to `0.0`.
@@ -392,7 +408,13 @@ mod tests {
 
     #[test]
     fn waveforms_cover_their_range() {
-        for w in [Waveform::Sine, Waveform::Square, Waveform::Triangle, Waveform::SawUp, Waveform::SawDown] {
+        for w in [
+            Waveform::Sine,
+            Waveform::Square,
+            Waveform::Triangle,
+            Waveform::SawUp,
+            Waveform::SawDown,
+        ] {
             let mut lo = f32::MAX;
             let mut hi = f32::MIN;
             for i in 0..1000 {
@@ -434,11 +456,22 @@ mod tests {
 
     #[test]
     fn string_round_trips() {
-        for w in [Waveform::Sine, Waveform::Square, Waveform::Triangle, Waveform::SawUp, Waveform::SawDown] {
-            assert_eq!(Waveform::from_str(w.as_str()), Some(w));
+        for w in [
+            Waveform::Sine,
+            Waveform::Square,
+            Waveform::Triangle,
+            Waveform::SawUp,
+            Waveform::SawDown,
+        ] {
+            assert_eq!(Waveform::from_name(w.as_str()), Some(w));
         }
-        for c in [ConditionKind::Spring, ConditionKind::Damper, ConditionKind::Inertia, ConditionKind::Friction] {
-            assert_eq!(ConditionKind::from_str(c.as_str()), Some(c));
+        for c in [
+            ConditionKind::Spring,
+            ConditionKind::Damper,
+            ConditionKind::Inertia,
+            ConditionKind::Friction,
+        ] {
+            assert_eq!(ConditionKind::from_name(c.as_str()), Some(c));
         }
         for d in [
             DeviceControl::Reset,
@@ -448,8 +481,8 @@ mod tests {
             DeviceControl::EnableActuators,
             DeviceControl::DisableActuators,
         ] {
-            assert_eq!(DeviceControl::from_str(d.as_str()), Some(d));
+            assert_eq!(DeviceControl::from_name(d.as_str()), Some(d));
         }
-        assert_eq!(Waveform::from_str("noise"), None);
+        assert_eq!(Waveform::from_name("noise"), None);
     }
 }

@@ -32,7 +32,11 @@ impl Recorder {
         Ok(Recorder {
             writer,
             start_us: now_us,
-            axis_interval_us: if axis_sample_hz == 0 { u64::MAX } else { 1_000_000 / axis_sample_hz as u64 },
+            axis_interval_us: if axis_sample_hz == 0 {
+                u64::MAX
+            } else {
+                1_000_000 / axis_sample_hz as u64
+            },
             next_axis_us: 0,
             last_axis: None,
             error: None,
@@ -110,8 +114,18 @@ mod tests {
     #[test]
     fn timestamps_are_relative_and_axis_is_throttled() {
         let buf = Arc::new(Mutex::new(Vec::new()));
-        let initial = [FfbEvent::Upload { id: 1, effect: Effect::constant(0.1) }, FfbEvent::Play { id: 1, count: 1 }];
-        let mut rec = Recorder::start(Box::new(Shared(buf.clone())), &Header::default(), 5_000_000, &initial, 100).unwrap();
+        let initial = [
+            FfbEvent::Upload { id: 1, effect: Effect::constant(0.1) },
+            FfbEvent::Play { id: 1, count: 1 },
+        ];
+        let mut rec = Recorder::start(
+            Box::new(Shared(buf.clone())),
+            &Header::default(),
+            5_000_000,
+            &initial,
+            100,
+        )
+        .unwrap();
         rec.event(5_001_000, &FfbEvent::Gain(0.5));
         rec.axis(5_001_000, Some(0.1));
         rec.axis(5_002_000, Some(0.2)); // too soon

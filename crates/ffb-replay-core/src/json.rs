@@ -50,7 +50,9 @@ impl Json {
 
     pub fn as_u64(&self) -> Option<u64> {
         match self {
-            Json::Num(n) if *n >= 0.0 && n.fract() == 0.0 && *n <= u64::MAX as f64 => Some(*n as u64),
+            Json::Num(n) if *n >= 0.0 && n.fract() == 0.0 && *n <= u64::MAX as f64 => {
+                Some(*n as u64)
+            }
             _ => None,
         }
     }
@@ -78,13 +80,6 @@ impl Json {
 
     pub fn is_null(&self) -> bool {
         matches!(self, Json::Null)
-    }
-
-    /// Compact single-line encoding.
-    pub fn to_string(&self) -> String {
-        let mut s = String::new();
-        self.write_to(&mut s);
-        s
     }
 
     pub fn write_to(&self, out: &mut String) {
@@ -226,6 +221,15 @@ impl<T: Into<Json>> From<Option<T>> for Json {
     }
 }
 
+/// Compact single-line encoding.
+impl std::fmt::Display for Json {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = String::new();
+        self.write_to(&mut s);
+        f.write_str(&s)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonError {
     pub offset: usize,
@@ -295,8 +299,11 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        let text = std::str::from_utf8(&self.s[start..self.i]).map_err(|_| self.err("bad number"))?;
-        text.parse::<f64>().map(Json::Num).map_err(|_| JsonError { offset: start, message: "bad number" })
+        let text =
+            std::str::from_utf8(&self.s[start..self.i]).map_err(|_| self.err("bad number"))?;
+        text.parse::<f64>()
+            .map(Json::Num)
+            .map_err(|_| JsonError { offset: start, message: "bad number" })
     }
 
     fn string(&mut self) -> Result<String, JsonError> {
@@ -346,7 +353,8 @@ impl<'a> Parser<'a> {
                         }
                         self.i += 1;
                     }
-                    let run = std::str::from_utf8(&self.s[start..self.i]).map_err(|_| self.err("bad utf-8"))?;
+                    let run = std::str::from_utf8(&self.s[start..self.i])
+                        .map_err(|_| self.err("bad utf-8"))?;
                     out.push_str(run);
                 }
             }
@@ -357,7 +365,8 @@ impl<'a> Parser<'a> {
         if self.i + 4 > self.s.len() {
             return Err(self.err("short \\u escape"));
         }
-        let text = std::str::from_utf8(&self.s[self.i..self.i + 4]).map_err(|_| self.err("bad \\u escape"))?;
+        let text = std::str::from_utf8(&self.s[self.i..self.i + 4])
+            .map_err(|_| self.err("bad \\u escape"))?;
         let v = u32::from_str_radix(text, 16).map_err(|_| self.err("bad \\u escape"))?;
         self.i += 4;
         Ok(v)

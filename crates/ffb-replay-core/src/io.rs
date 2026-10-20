@@ -233,18 +233,31 @@ impl ScriptedSource {
     /// pipeline so the source's clock advances one tick per poll.
     pub fn new(mut script: Vec<(u64, FfbEvent)>, tick_hz: u32, looped: bool) -> Self {
         script.sort_by_key(|(t, _)| *t);
-        ScriptedSource { script, next: 0, clock_us: 0, tick_us: 1_000_000 / tick_hz.max(1) as u64, looped }
+        ScriptedSource {
+            script,
+            next: 0,
+            clock_us: 0,
+            tick_us: 1_000_000 / tick_hz.max(1) as u64,
+            looped,
+        }
     }
 
     /// A constant force following a slow sine, updated at `update_hz`, for
     /// `seconds`. The classic shape of a game animating one constant effect.
     pub fn sine_demo(tick_hz: u32, update_hz: u32, seconds: f32, looped: bool) -> Self {
-        let mut script = vec![(0, FfbEvent::Upload { id: 1, effect: crate::model::Effect::constant(0.0) }), (0, FfbEvent::Play { id: 1, count: 1 })];
+        let mut script = vec![
+            (0, FfbEvent::Upload { id: 1, effect: crate::model::Effect::constant(0.0) }),
+            (0, FfbEvent::Play { id: 1, count: 1 }),
+        ];
         let updates = (seconds * update_hz as f32) as u64;
         for i in 1..=updates {
             let t = i as f32 / update_hz as f32;
-            let v = 0.6 * (t * core::f32::consts::TAU * 0.5).sin() + 0.15 * (t * core::f32::consts::TAU * 7.0).sin();
-            script.push((i * 1_000_000 / update_hz as u64, FfbEvent::Upload { id: 1, effect: crate::model::Effect::constant(v) }));
+            let v = 0.6 * (t * core::f32::consts::TAU * 0.5).sin()
+                + 0.15 * (t * core::f32::consts::TAU * 7.0).sin();
+            script.push((
+                i * 1_000_000 / update_hz as u64,
+                FfbEvent::Upload { id: 1, effect: crate::model::Effect::constant(v) },
+            ));
         }
         script.push((updates * 1_000_000 / update_hz as u64 + 1, FfbEvent::Stop { id: 1 }));
         ScriptedSource::new(script, tick_hz, looped)
@@ -310,7 +323,10 @@ mod tests {
         let mut s = ScriptedSource::new(vec![(0, FfbEvent::Gain(0.5))], 1000, true);
         let mut out = Vec::new();
         assert_eq!(s.poll(&mut out).unwrap(), SourceStatus::Active);
-        assert_eq!(out, vec![FfbEvent::Gain(0.5), FfbEvent::Control(crate::model::DeviceControl::Reset)]);
+        assert_eq!(
+            out,
+            vec![FfbEvent::Gain(0.5), FfbEvent::Control(crate::model::DeviceControl::Reset)]
+        );
         out.clear();
         assert_eq!(s.poll(&mut out).unwrap(), SourceStatus::Active);
         assert_eq!(out[0], FfbEvent::Gain(0.5));

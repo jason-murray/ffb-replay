@@ -71,9 +71,15 @@ pub enum RecordBody {
 #[derive(Debug)]
 pub enum FormatError {
     Io(io::Error),
-    Json { line: usize, error: JsonError },
+    Json {
+        line: usize,
+        error: JsonError,
+    },
     /// A well-formed JSON line that is not a valid record.
-    Schema { line: usize, message: String },
+    Schema {
+        line: usize,
+        message: String,
+    },
     NotARecording,
     UnsupportedVersion(u32),
 }
@@ -112,7 +118,11 @@ pub fn header_to_json(h: &Header) -> Json {
 }
 
 fn envelope_to_json(e: &Envelope) -> Json {
-    Json::obj().with("al", e.attack_level).with("at", e.attack_ms).with("fl", e.fade_level).with("ft", e.fade_ms)
+    Json::obj()
+        .with("al", e.attack_level)
+        .with("at", e.attack_ms)
+        .with("fl", e.fade_level)
+        .with("ft", e.fade_ms)
 }
 
 fn condition_to_json(c: &Condition) -> Json {
@@ -148,7 +158,10 @@ pub fn effect_to_json(e: &Effect) -> Json {
     };
     j = j.with("dur", e.duration_ms).with("delay", e.delay_ms).with("dir", e.direction_deg);
     if e.trigger_button != 0 || e.trigger_interval_ms != 0 {
-        j = j.with("trig", Json::obj().with("btn", e.trigger_button).with("int", e.trigger_interval_ms));
+        j = j.with(
+            "trig",
+            Json::obj().with("btn", e.trigger_button).with("int", e.trigger_interval_ms),
+        );
     }
     j
 }
@@ -251,7 +264,10 @@ fn condition_from_json(j: &Json) -> Condition {
 }
 
 pub fn effect_from_json(j: &Json, line: usize) -> Result<Effect, FormatError> {
-    let ty = j.get("type").and_then(Json::as_str).ok_or_else(|| schema(line, "effect without 'type'"))?;
+    let ty = j
+        .get("type")
+        .and_then(Json::as_str)
+        .ok_or_else(|| schema(line, "effect without 'type'"))?;
     let kind = match ty {
         "constant" => EffectKind::Constant {
             magnitude: clamp_signed(num_f32(j, "mag", line)?),
@@ -266,7 +282,7 @@ pub fn effect_from_json(j: &Json, line: usize) -> Result<Effect, FormatError> {
             waveform: j
                 .get("wave")
                 .and_then(Json::as_str)
-                .and_then(Waveform::from_str)
+                .and_then(Waveform::from_name)
                 .ok_or_else(|| schema(line, "periodic effect without a known 'wave'"))?,
             magnitude: clamp_signed(num_f32(j, "mag", line)?),
             offset: clamp_signed(opt_f32(j, "off")),
@@ -278,7 +294,7 @@ pub fn effect_from_json(j: &Json, line: usize) -> Result<Effect, FormatError> {
             let kind = j
                 .get("cond")
                 .and_then(Json::as_str)
-                .and_then(ConditionKind::from_str)
+                .and_then(ConditionKind::from_name)
                 .ok_or_else(|| schema(line, "condition effect without a known 'cond'"))?;
             let axes = j.get("axes").and_then(Json::as_arr).unwrap_or(&[]);
             let a0 = axes.first().map(condition_from_json).unwrap_or_default();
@@ -306,7 +322,8 @@ pub fn effect_from_json(j: &Json, line: usize) -> Result<Effect, FormatError> {
         delay_ms: opt_u32(j, "delay"),
         direction_deg: wrap_degrees(opt_f32(j, "dir")),
         trigger_button: trig.map(|t| opt_u32(t, "btn")).unwrap_or(0).min(u16::MAX as u32) as u16,
-        trigger_interval_ms: trig.map(|t| opt_u32(t, "int")).unwrap_or(0).min(u16::MAX as u32) as u16,
+        trigger_interval_ms: trig.map(|t| opt_u32(t, "int")).unwrap_or(0).min(u16::MAX as u32)
+            as u16,
     })
 }
 
@@ -322,7 +339,10 @@ pub fn event_from_json(j: &Json, line: usize) -> Result<FfbEvent, FormatError> {
     Ok(match k {
         "upload" => FfbEvent::Upload {
             id: id_from_json(j, line)?,
-            effect: effect_from_json(j.get("fx").ok_or_else(|| schema(line, "upload without 'fx'"))?, line)?,
+            effect: effect_from_json(
+                j.get("fx").ok_or_else(|| schema(line, "upload without 'fx'"))?,
+                line,
+            )?,
         },
         "erase" => FfbEvent::Erase { id: id_from_json(j, line)? },
         "play" => FfbEvent::Play { id: id_from_json(j, line)?, count: opt_u32(j, "n") },
@@ -332,7 +352,7 @@ pub fn event_from_json(j: &Json, line: usize) -> Result<FfbEvent, FormatError> {
         "control" => FfbEvent::Control(
             j.get("v")
                 .and_then(Json::as_str)
-                .and_then(DeviceControl::from_str)
+                .and_then(DeviceControl::from_name)
                 .ok_or_else(|| schema(line, "control event without a known 'v'"))?,
         ),
         other => return Err(schema(line, format!("unknown event kind '{other}'"))),
@@ -340,7 +360,8 @@ pub fn event_from_json(j: &Json, line: usize) -> Result<FfbEvent, FormatError> {
 }
 
 pub fn record_from_json(j: &Json, line: usize) -> Result<Record, FormatError> {
-    let t_us = j.get("t").and_then(Json::as_u64).ok_or_else(|| schema(line, "record without 't'"))?;
+    let t_us =
+        j.get("t").and_then(Json::as_u64).ok_or_else(|| schema(line, "record without 't'"))?;
     let body = if let Some(ev) = j.get("ev") {
         RecordBody::Ffb(event_from_json(ev, line)?)
     } else if let Some(a) = j.get("axis").and_then(Json::as_f32) {
@@ -479,13 +500,38 @@ mod tests {
 
     fn sample_effects() -> Vec<Effect> {
         let env = Envelope { attack_level: 0.1, attack_ms: 20, fade_level: 0.5, fade_ms: 30 };
-        let cond = Condition { center: 0.1, deadband: 0.05, right_coeff: 0.8, left_coeff: -0.3, right_sat: 1.0, left_sat: 0.6 };
+        let cond = Condition {
+            center: 0.1,
+            deadband: 0.05,
+            right_coeff: 0.8,
+            left_coeff: -0.3,
+            right_sat: 1.0,
+            left_sat: 0.6,
+        };
         vec![
             Effect::constant(-0.375),
-            Effect { kind: EffectKind::Constant { magnitude: 0.5, envelope: env }, duration_ms: Some(250), delay_ms: 10, direction_deg: 270.0, trigger_button: 3, trigger_interval_ms: 100 },
-            Effect::with_kind(EffectKind::Ramp { start: 0.1, end: -0.9, envelope: env }).with_duration(Some(500)),
-            Effect::with_kind(EffectKind::Periodic { waveform: Waveform::SawDown, magnitude: 0.6, offset: -0.1, phase: 0.25, period_ms: 40, envelope: Envelope::default() }),
-            Effect::with_kind(EffectKind::Condition { kind: ConditionKind::Damper, axes: [cond, Condition::default()] }),
+            Effect {
+                kind: EffectKind::Constant { magnitude: 0.5, envelope: env },
+                duration_ms: Some(250),
+                delay_ms: 10,
+                direction_deg: 270.0,
+                trigger_button: 3,
+                trigger_interval_ms: 100,
+            },
+            Effect::with_kind(EffectKind::Ramp { start: 0.1, end: -0.9, envelope: env })
+                .with_duration(Some(500)),
+            Effect::with_kind(EffectKind::Periodic {
+                waveform: Waveform::SawDown,
+                magnitude: 0.6,
+                offset: -0.1,
+                phase: 0.25,
+                period_ms: 40,
+                envelope: Envelope::default(),
+            }),
+            Effect::with_kind(EffectKind::Condition {
+                kind: ConditionKind::Damper,
+                axes: [cond, Condition::default()],
+            }),
             Effect::with_kind(EffectKind::Rumble { strong: 1.0, weak: 0.25 }),
         ]
     }
@@ -502,7 +548,7 @@ mod tests {
 
     #[test]
     fn events_and_records_round_trip() {
-        let events = vec![
+        let events = [
             FfbEvent::Upload { id: 7, effect: Effect::constant(0.25) },
             FfbEvent::Erase { id: 7 },
             FfbEvent::Play { id: 1, count: 0 },
@@ -511,11 +557,20 @@ mod tests {
             FfbEvent::Autocenter(0.0),
             FfbEvent::Control(DeviceControl::StopAll),
         ];
-        let mut records: Vec<Record> =
-            events.iter().enumerate().map(|(i, ev)| Record { t_us: i as u64 * 1000, body: RecordBody::Ffb(*ev) }).collect();
+        let mut records: Vec<Record> = events
+            .iter()
+            .enumerate()
+            .map(|(i, ev)| Record { t_us: i as u64 * 1000, body: RecordBody::Ffb(*ev) })
+            .collect();
         records.push(Record { t_us: 99_999, body: RecordBody::Axis(-0.5) });
 
-        let header = Header { created_unix: 1_700_000_000, source: "test".into(), sink: "null".into(), tick_hz: 1000, ..Default::default() };
+        let header = Header {
+            created_unix: 1_700_000_000,
+            source: "test".into(),
+            sink: "null".into(),
+            tick_hz: 1000,
+            ..Default::default()
+        };
         let rec = Recording { header, records };
         let mut bytes = Vec::new();
         rec.write_to(&mut bytes).unwrap();
@@ -531,7 +586,10 @@ mod tests {
 
     #[test]
     fn rejects_foreign_files_and_future_versions() {
-        assert!(matches!(Recording::read_from("{\"hello\":1}\n".as_bytes()), Err(FormatError::NotARecording)));
+        assert!(matches!(
+            Recording::read_from("{\"hello\":1}\n".as_bytes()),
+            Err(FormatError::NotARecording)
+        ));
         assert!(matches!(Recording::read_from("".as_bytes()), Err(FormatError::NotARecording)));
         assert!(matches!(
             Recording::read_from("{\"format\":\"ffb-replay\",\"version\":99}\n".as_bytes()),
