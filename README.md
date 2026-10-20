@@ -172,6 +172,14 @@ dependencies, no `unsafe`, and the hot path is allocation-free. The seams:
 A Windows backend crate would sit next to `ffb-replay-linux` and plug into
 `app/src/backends.rs`.
 
+## Releases
+
+Tagged commits on `main` are built by `.github/workflows/release.yml` into
+archives for Linux (x86_64), Windows (x86_64) and macOS (arm64 and x86_64),
+published as a GitHub release with checksums. To cut one: bump `version`
+in the workspace `Cargo.toml`, add `docs/release-notes/v<x.y.z>.md`, merge
+to `main`, then push the tag `v<x.y.z>`.
+
 ## Development
 
 ```sh

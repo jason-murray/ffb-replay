@@ -1,0 +1,152 @@
+name: Release
+
+# Builds the ffb-replay binary for Linux, Windows and macOS and publishes
+# the archives as a GitHub release.
+#
+# Trigger: push a tag like v0.1.0 (the tag must match the workspace version
+# in Cargo.toml), or run manually with a version input. Releases only ever
+# come from commits on main.
+#
+# Release notes: docs/release-notes/v<version>.md is used as the body when
+# it exists; otherwise GitHub's generated notes are used.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (x.y.z); must match Cargo.toml'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require commit on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "Refusing to release: $GITHUB_SHA is not on main"; exit 1; }
+
+      - name: Resolve and verify version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v='${{ inputs.version }}'
+          else
+            v='${{ github.ref_name }}'; v="${v#v}"
+          fi
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Version '$v' is not x.y.z"; exit 1; }
+          cargo_v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "$v" = "$cargo_v" ] || { echo "Tag version $v does not match Cargo.toml version $cargo_v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      NAME: ffb-replay-${{ needs.check.outputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked -p ffb-replay --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p "dist/$NAME"
+          cp "target/${{ matrix.target }}/release/ffb-replay" README.md LICENSE "dist/$NAME/"
+          tar -C dist -czf "$NAME.tar.gz" "$NAME"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "dist/$env:NAME" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/ffb-replay.exe", README.md, LICENSE "dist/$env:NAME/"
+          Compress-Archive -Path "dist/$env:NAME" -DestinationPath "$env:NAME.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ env.NAME }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          sha256sum ffb-replay-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Release notes
+        id: notes
+        run: |
+          f="docs/release-notes/v$VERSION.md"
+          if [ -s "$f" ]; then
+            echo "file=$f" >> "$GITHUB_OUTPUT"
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: ffb-replay v${{ env.VERSION }}
+          body_path: ${{ steps.notes.outputs.file }}
+          generate_release_notes: ${{ steps.notes.outputs.generate }}
+          files: artifacts/*
+          fail_on_unmatched_files: true
