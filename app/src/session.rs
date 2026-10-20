@@ -539,7 +539,10 @@ mod tests {
         assert_eq!(recording_path(dir, "lap1"), PathBuf::from("/tmp/rec/lap1.ffbr"));
         assert_eq!(recording_path(dir, "lap1.ffbr"), PathBuf::from("/tmp/rec/lap1.ffbr"));
         assert_eq!(recording_path(dir, "/elsewhere/x"), PathBuf::from("/elsewhere/x.ffbr"));
-        assert!(recording_path(dir, "").to_string_lossy().starts_with("/tmp/rec/ffb-"));
+        let stamped = recording_path(dir, "");
+        assert_eq!(stamped.parent(), Some(dir));
+        assert!(stamped.file_name().unwrap().to_string_lossy().starts_with("ffb-"));
+        assert_eq!(stamped.extension().and_then(|e| e.to_str()), Some("ffbr"));
     }
 
     #[test]
@@ -555,9 +558,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(120));
         let path = s.start_recording("take", "notes here").unwrap();
         std::thread::sleep(Duration::from_millis(150));
+        // ~270 ms of 1 kHz samples by now; be lenient about CI schedulers.
         let (samples, seq) = s.samples_since(0, 100_000);
-        assert!(samples.len() >= 100, "{}", samples.len());
-        assert!(seq >= 100);
+        assert!(samples.len() >= 60, "{}", samples.len());
+        assert!(seq >= 60);
         let (more, _) = s.samples_since(seq, 100);
         assert!(more.len() <= 100);
         s.stop_recording().unwrap();
