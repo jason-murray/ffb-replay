@@ -12,6 +12,7 @@
 //! - [`format`]: the `.ffbr` JSON Lines recording format.
 //! - [`recorder`] / [`player`]: write a recording from the live stream;
 //!   play one back as a source.
+//! - [`offline`]: render a whole recording to a trace without a device.
 //! - [`pipeline`]: the tick loop that joins a source to a sink, with
 //!   recording and a sample stream for a UI.
 //!
@@ -22,6 +23,7 @@ pub mod format;
 pub mod io;
 pub mod json;
 pub mod model;
+pub mod offline;
 pub mod pacer;
 pub mod pipeline;
 pub mod player;

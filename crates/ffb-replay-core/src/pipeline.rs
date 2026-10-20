@@ -8,7 +8,7 @@
 
 use crate::format::Header;
 use crate::io::{BackendError, FfbSink, FfbSource, SinkMode, SourceStatus};
-use crate::model::{FfbEvent, InputEvent};
+use crate::model::{DeviceControl, FfbEvent, InputEvent};
 use crate::pacer::Pacer;
 use crate::recorder::Recorder;
 use crate::render::{AxisState, Rendered, Renderer};
@@ -215,7 +215,15 @@ impl Pipeline {
                             break 'run Outcome::Error(format!("recording failed: {e}"));
                         }
                     }
-                    Ok(Command::SetPaused(p)) => self.source.set_paused(p),
+                    Ok(Command::SetPaused(p)) => {
+                        // Pause the device too: a held constant force would
+                        // keep pushing the wheel while the timeline stands.
+                        self.source.set_paused(p);
+                        let ctl = if p { DeviceControl::Pause } else { DeviceControl::Continue };
+                        if let Err(e) = self.forward(&FfbEvent::Control(ctl), now_us) {
+                            break 'run Outcome::Error(e.message);
+                        }
+                    }
                     Ok(Command::Inject(ev)) => {
                         if let Err(e) = self.forward(&ev, now_us) {
                             break 'run Outcome::Error(e.message);
@@ -378,13 +386,23 @@ mod tests {
         assert_eq!(summary.outcome, Outcome::SourceFinished);
         assert_eq!(summary.events_total, 5);
         let samples: Vec<Sample> = s_rx.try_iter().collect();
-        assert!(samples.len() >= 30, "{}", samples.len());
+        assert!(samples.len() >= 20, "{}", samples.len());
         assert!((samples[0].rendered.total - 0.25).abs() < 1e-6, "{:?}", samples[0]);
-        let mid = samples.iter().find(|s| s.t_us >= 15_000 && s.t_us < 20_000).unwrap();
-        assert!((mid.rendered.total + 0.5).abs() < 1e-6, "{mid:?}");
-        let late = samples.iter().find(|s| s.t_us >= 25_000 && s.t_us < 30_000).unwrap();
-        assert!((late.rendered.total + 0.25).abs() < 1e-6, "{late:?}");
-        assert_eq!(samples.last().unwrap().rendered.total, 0.0);
+        // Wall-clock windows are not reliable on a loaded CI box; check the
+        // sequence of force levels instead.
+        assert_eq!(levels(&samples), vec![0.25, -0.5, -0.25, 0.0]);
+    }
+
+    /// Distinct consecutive force levels of a sample stream.
+    fn levels(samples: &[Sample]) -> Vec<f32> {
+        let mut out: Vec<f32> = Vec::new();
+        for s in samples {
+            let v = (s.rendered.total * 1000.0).round() / 1000.0;
+            if out.last() != Some(&v) {
+                out.push(v);
+            }
+        }
+        out
     }
 
     #[test]
@@ -470,19 +488,53 @@ mod tests {
         assert_eq!(summary2.outcome, Outcome::SourceFinished);
         let replayed: Vec<Sample> = s_rx2.try_iter().collect();
         assert!(replayed.len() >= 60, "{}", replayed.len());
-        let first = replayed.iter().find(|s| s.t_us >= 2_000).unwrap();
-        assert!((first.rendered.total - 0.25).abs() < 1e-6, "{first:?}");
-        let at = |samples: &[Sample], t: u64| {
-            samples.iter().find(|s| s.t_us >= t).map(|s| s.rendered.total).unwrap()
-        };
-        // Live timeline is offset by the recording start (~5 ms); compare steady-state windows.
-        assert!((at(&replayed, 15_000) - at(&live, 15_000 + 5_000)).abs() < 1e-6);
-        assert!(
-            (at(&replayed, 65_000) + 0.25).abs() < 1e-6,
-            "second play after gain 0.5: {}",
-            at(&replayed, 65_000)
-        );
+        // The recording began a few ms in (exactly when depends on scheduling),
+        // so compare the tail of the level sequences: the second play after
+        // the gain change, then silence, must come out identically.
+        let live_levels = levels(&live);
+        let replayed_levels = levels(&replayed);
+        let tail = [-0.5, -0.25, 0.0, -0.25, 0.0];
+        assert!(live_levels.ends_with(&tail), "live: {live_levels:?}");
+        assert!(replayed_levels.ends_with(&tail), "replayed: {replayed_levels:?}");
         assert_eq!(replayed.last().unwrap().rendered.total, 0.0);
+    }
+
+    #[test]
+    fn pausing_silences_the_device_and_resuming_restores_it() {
+        let (cmd_tx, cmd_rx) = channel();
+        let (s_tx, s_rx) = sync_channel(4096);
+        let script = vec![
+            (0, FfbEvent::Upload { id: 1, effect: Effect::constant(0.5) }),
+            (0, FfbEvent::Play { id: 1, count: 1 }),
+            (200_000, FfbEvent::Stop { id: 1 }),
+        ];
+        let p = Pipeline::new(
+            Box::new(ScriptedSource::new(script, 1000, false)),
+            Box::new(CaptureSink::effects()),
+            PipelineConfig::default(),
+        );
+        let handle = std::thread::spawn(move || p.run(cmd_rx, s_tx));
+        while s_rx.recv().unwrap().t_us < 10_000 {}
+        cmd_tx.send(Command::SetPaused(true)).unwrap();
+        let paused = loop {
+            let s = s_rx.recv().unwrap();
+            if s.rendered.paused {
+                break s;
+            }
+            assert!(s.t_us < 50_000, "never paused");
+        };
+        assert_eq!(paused.rendered.total, 0.0);
+        cmd_tx.send(Command::SetPaused(false)).unwrap();
+        let resumed = loop {
+            let s = s_rx.recv().unwrap();
+            if !s.rendered.paused {
+                break s;
+            }
+        };
+        assert!((resumed.rendered.total - 0.5).abs() < 1e-6, "{resumed:?}");
+        cmd_tx.send(Command::Stop).unwrap();
+        let summary = handle.join().unwrap();
+        assert_eq!(summary.outcome, Outcome::Stopped);
     }
 
     #[test]

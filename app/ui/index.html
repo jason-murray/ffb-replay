@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ffb-replay</title>
+<style>
+  :root {
+    --bg: #09090b; --panel: #18181b; --panel2: #27272a; --line: #3f3f46; --text: #e4e4e7; --muted: #a1a1aa;
+    --force: #a78bfa; --constant: #38bdf8; --ramp: #fb923c; --periodic: #fbbf24; --condition: #f472b6; --rumble: #c084fc; --axis: #34d399;
+    --rec: #ef4444; --ok: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  .badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
+  .badge.live { color: var(--ok); } .badge.rec { color: var(--rec); } .badge.play { color: var(--force); }
+  .spacer { flex: 1; }
+  main { display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; flex: 1; min-height: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .card h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  label { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  select, input[type=text], input[type=number] { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; min-width: 0; }
+  input[type=text] { width: 170px; } input[type=number] { width: 70px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 11px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #71717a; } button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #3b2f6b; border-color: #6d5bb8; } button.rec { background: #4a1414; border-color: #b91c1c; } button.rec:hover { background: #7f1d1d; }
+  button.active { outline: 2px solid var(--force); }
+  .plot { flex: 1; min-height: 260px; display: flex; flex-direction: column; }
+  canvas { width: 100%; height: 100%; min-height: 240px; display: block; flex: 1; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; margin-top: 6px; color: var(--muted); }
+  .legend label { cursor: pointer; } .legend input { accent-color: var(--force); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .stats div span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  .log { font-family: ui-monospace, Menlo, monospace; font-size: 11px; max-height: 120px; overflow: auto; color: var(--muted); white-space: pre-wrap; }
+  .log .err { color: var(--rec); }
+  .progress { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--force); }
+  .hint { color: var(--muted); font-size: 11px; }
+  .error { color: var(--rec); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ffb-replay</h1>
+  <span id="mode" class="badge">idle</span>
+  <span id="conn" class="badge">connecting</span>
+  <span class="spacer"></span>
+  <span id="pipe" class="hint"></span>
+</header>
+<main>
+  <div class="row">
+    <div class="card" style="flex: 2 1 420px">
+      <h2>Live passthrough</h2>
+      <div class="controls">
+        <label>Source
+          <select id="source">
+            <option value="virtual">virtual wheel (game binds here)</option>
+            <option value="mirror">mirror of sink device</option>
+            <option value="demo:loop">demo signal (synthetic, loops)</option>
+            <option value="demo">demo signal (synthetic, once)</option>
+            <option value="idle">idle (test pulses only)</option>
+          </select>
+        </label>
+        <label>Sink <select id="sink"><option value="none">none (graph only)</option></select></label>
+        <label><input type="checkbox" id="grab" checked> grab device</label>
+        <button id="btnLive" class="primary">Start</button>
+        <button id="btnStop">Stop</button>
+        <button id="btnDevices" title="Rescan devices">⟳</button>
+      </div>
+      <div class="controls" style="margin-top: 8px">
+        <label>Name <input type="text" id="recName" placeholder="(timestamp)"></label>
+        <label>Notes <input type="text" id="recNotes" placeholder="car, track, settings…"></label>
+        <button id="btnRec" class="rec">● Record</button>
+        <button id="btnRecStop">■ Stop recording</button>
+        <span id="recInfo" class="hint"></span>
+      </div>
+      <div class="controls" style="margin-top: 8px">
+        <span class="hint">Test:</span>
+        <label>pulse <input type="number" id="pulseMag" value="0.3" step="0.05" min="-1" max="1"></label>
+        <label>ms <input type="number" id="pulseMs" value="200" step="50" min="1"></label>
+        <button id="btnPulse">Send pulse</button>
+        <button id="btnReset">Reset device</button>
+      </div>
+    </div>
+    <div class="card" style="flex: 1 1 320px">
+      <h2>Playback</h2>
+      <div class="controls">
+        <label>Recording <select id="recList"></select></label>
+        <button id="btnRecordings" title="Rescan recordings">⟳</button>
+        <label>Speed <input type="number" id="speed" value="1" step="0.25" min="0.05" max="20"></label>
+        <label><input type="checkbox" id="loop"> loop</label>
+      </div>
+      <div class="controls" style="margin-top: 8px">
+        <button id="btnPlay" class="primary">▶ Play</button>
+        <button id="btnPause">⏸ Pause</button>
+        <button id="btnPlayStop">■ Stop</button>
+        <span id="playInfo" class="hint"></span>
+      </div>
+      <div class="progress"><i id="progress"></i></div>
+      <div id="recDetails" class="hint" style="margin-top: 6px"></div>
+    </div>
+  </div>
+
+  <div class="card plot">
+    <div class="controls" style="margin-bottom: 6px">
+      <h2 style="margin: 0 10px 0 0">Force</h2>
+      <label>window
+        <select id="window">
+          <option value="2">2 s</option><option value="5">5 s</option><option value="10" selected>10 s</option><option value="30">30 s</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="follow" checked> follow</label>
+      <span class="spacer"></span>
+      <span id="cursorInfo" class="hint"></span>
+    </div>
+    <canvas id="plot"></canvas>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="row">
+    <div class="card" style="flex: 2 1 400px">
+      <h2>Status</h2>
+      <div class="stats">
+        <div><span>force</span><b id="sForce">-</b></div>
+        <div><span>steering</span><b id="sAxis">-</b></div>
+        <div><span>events</span><b id="sEvents">0</b></div>
+        <div><span>events / s</span><b id="sRate">0</b></div>
+        <div><span>playing / loaded</span><b id="sPlaying">0 / 0</b></div>
+        <div><span>gain</span><b id="sGain">-</b></div>
+        <div><span>tick</span><b id="sTick">-</b></div>
+        <div><span>late ticks</span><b id="sLate">0</b></div>
+        <div><span>sink errors</span><b id="sErrors">0</b></div>
+        <div><span>pipeline time</span><b id="sTime">-</b></div>
+      </div>
+    </div>
+    <div class="card" style="flex: 3 1 400px">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</main>
+<script>
+(() => {
+  // ---- data -------------------------------------------------------------
+  // Ring buffers of the sample stream. Each sample: t (ms), total, constant,
+  // ramp, periodic, condition, rumble, axis (NaN when unknown), recording.
+  const CAP = 60_000;
+  const cols = { t: 0, force: 1, constant: 2, ramp: 3, periodic: 4, condition: 5, rumble: 6, axis: 7 };
+  const buf = {};
+  for (const k of Object.keys(cols)) buf[k] = new Float32Array(CAP);
+  const recFlag = new Uint8Array(CAP);
+  let head = 0, count = 0, seq = 0;
+  let lastEventsTotal = 0, lastEventsT = 0, eventRate = 0;
+
+  function push(s) {
+    for (const k of Object.keys(cols)) {
+      const v = s[cols[k]];
+      buf[k][head] = v === null || v === undefined ? NaN : v;
+    }
+    recFlag[head] = s[8] ? 1 : 0;
+    head = (head + 1) % CAP;
+    if (count < CAP) count++;
+  }
+  function at(k, i) { return buf[k][(head - count + i + CAP) % CAP]; }
+  function clearData() { head = 0; count = 0; }
+
+  // ---- series -----------------------------------------------------------
+  const series = [
+    { key: 'force', label: 'force (total)', color: css('--force'), on: true, width: 1.6 },
+    { key: 'constant', label: 'constant', color: css('--constant'), on: true, width: 1 },
+    { key: 'ramp', label: 'ramp', color: css('--ramp'), on: false, width: 1 },
+    { key: 'periodic', label: 'periodic', color: css('--periodic'), on: true, width: 1 },
+    { key: 'condition', label: 'condition (spring/damper)', color: css('--condition'), on: true, width: 1 },
+    { key: 'rumble', label: 'rumble', color: css('--rumble'), on: false, width: 1 },
+    { key: 'axis', label: 'steering', color: css('--axis'), on: true, width: 1.2 },
+  ];
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  const legend = document.getElementById('legend');
+  for (const s of series) {
+    const l = document.createElement('label');
+    l.innerHTML = `<input type="checkbox" ${s.on ? 'checked' : ''}> <span style="color:${s.color}">▬ ${s.label}</span>`;
+    l.querySelector('input').addEventListener('change', e => { s.on = e.target.checked; draw(); });
+    legend.appendChild(l);
+  }
+  const recLegend = document.createElement('span');
+  recLegend.innerHTML = `<span style="color:${css('--rec')}">▮ recording</span>`;
+  legend.appendChild(recLegend);
+
+  // ---- plot -------------------------------------------------------------
+  const canvas = document.getElementById('plot');
+  const ctx = canvas.getContext('2d');
+  let cursorX = null;
+  function fit() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    return dpr;
+  }
+  new ResizeObserver(draw).observe(canvas);
+  canvas.addEventListener('mousemove', e => { const r = canvas.getBoundingClientRect(); cursorX = (e.clientX - r.left) / r.width; draw(); });
+  canvas.addEventListener('mouseleave', () => { cursorX = null; document.getElementById('cursorInfo').textContent = ''; draw(); });
+
+  function draw() {
+    const dpr = fit();
+    const w = canvas.width, h = canvas.height;
+    const padL = 36 * dpr, padR = 8 * dpr, padT = 6 * dpr, padB = 18 * dpr;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    ctx.clearRect(0, 0, w, h);
+    if (count < 2) { drawAxes(dpr, padL, padT, pw, ph, 0, 1); return; }
+    const windowMs = parseFloat(document.getElementById('window').value) * 1000;
+    const tEnd = at('t', count - 1);
+    const t0 = tEnd - windowMs, t1 = tEnd;
+    // Index of the first sample in the window (samples are time-ordered).
+    let lo = 0, hi = count - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (at('t', m) < t0) lo = m + 1; else hi = m; }
+    const first = Math.max(0, lo - 1);
+    const xOf = t => padL + ((t - t0) / (t1 - t0)) * pw;
+    const yOf = v => padT + (1 - (Math.max(-1, Math.min(1, v)) + 1) / 2) * ph;
+
+    // Recording regions.
+    ctx.fillStyle = 'rgba(239,68,68,0.10)';
+    let runStart = -1;
+    for (let i = first; i <= count; i++) {
+      const on = i < count && recFlag[(head - count + i + CAP) % CAP];
+      if (on && runStart < 0) runStart = i;
+      if (!on && runStart >= 0) { const x0 = xOf(at('t', runStart)), x1 = xOf(at('t', i - 1)); ctx.fillRect(x0, padT, Math.max(x1 - x0, 1), ph); runStart = -1; }
+    }
+    drawAxes(dpr, padL, padT, pw, ph, t0, t1);
+
+    // Series, decimated to at most ~2 samples per pixel with min/max so spikes survive.
+    const n = count - first;
+    const perPx = Math.max(1, Math.floor(n / pw));
+    for (const s of series) {
+      if (!s.on) continue;
+      ctx.strokeStyle = s.color; ctx.lineWidth = s.width * dpr; ctx.beginPath();
+      let started = false;
+      for (let i = first; i < count; i += perPx) {
+        let mn = Infinity, mx = -Infinity, tm = 0, any = false;
+        for (let j = i; j < Math.min(i + perPx, count); j++) { const v = at(s.key, j); if (Number.isNaN(v)) continue; any = true; if (v < mn) mn = v; if (v > mx) mx = v; tm = at('t', j); }
+        if (!any) { started = false; continue; }
+        const x = xOf(tm);
+        if (!started) { ctx.moveTo(x, yOf(mn)); started = true; } else ctx.lineTo(x, yOf(mn));
+        if (mx !== mn) ctx.lineTo(x, yOf(mx));
+      }
+      ctx.stroke();
+    }
+
+    // Cursor readout.
+    if (cursorX !== null) {
+      const x = padL + cursorX * w - padL * cursorX * 0; // cursorX is a fraction of the full canvas width
+      const px = Math.max(padL, Math.min(w - padR, cursorX * w));
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = dpr; ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + ph); ctx.stroke();
+      const tc = t0 + ((px - padL) / pw) * (t1 - t0);
+      let lo2 = first, hi2 = count - 1;
+      while (lo2 < hi2) { const m = (lo2 + hi2) >> 1; if (at('t', m) < tc) lo2 = m + 1; else hi2 = m; }
+      const parts = [`t ${(at('t', lo2) / 1000).toFixed(3)} s`];
+      for (const s of series) if (s.on) { const v = at(s.key, lo2); parts.push(`${s.key} ${Number.isNaN(v) ? '-' : v.toFixed(3)}`); }
+      document.getElementById('cursorInfo').textContent = parts.join('   ');
+      void x;
+    }
+  }
+  function drawAxes(dpr, padL, padT, pw, ph, t0, t1) {
+    ctx.strokeStyle = css('--line'); ctx.lineWidth = dpr; ctx.fillStyle = css('--muted');
+    ctx.font = `${10 * dpr}px ui-monospace, Menlo, monospace`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (const v of [1, 0.5, 0, -0.5, -1]) {
+      const y = padT + (1 - (v + 1) / 2) * ph;
+      ctx.globalAlpha = v === 0 ? 1 : 0.5; ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + pw, y); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.fillText(v.toFixed(1), padL - 4 * dpr, y);
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    const span = (t1 - t0) / 1000; const step = span <= 2 ? 0.25 : span <= 5 ? 0.5 : span <= 10 ? 1 : 5;
+    const start = Math.ceil(t0 / 1000 / step) * step;
+    for (let s = start; s <= t1 / 1000 + 1e-6; s += step) {
+      const x = padL + ((s * 1000 - t0) / (t1 - t0)) * pw;
+      ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + ph); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.fillText(`${s.toFixed(step < 1 ? 2 : 0)}`, x, padT + ph + 3 * dpr);
+    }
+  }
+
+  // ---- API --------------------------------------------------------------
+  async function api(path, body) {
+    const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) { logLine(`error: ${j.error || r.statusText}`, true); throw new Error(j.error || r.statusText); }
+    return j;
+  }
+  const $ = id => document.getElementById(id);
+  function logLine(text, isErr) {
+    const el = $('log'); const d = document.createElement('div'); d.textContent = text; if (isErr) d.className = 'err';
+    el.prepend(d); while (el.childElementCount > 60) el.lastChild.remove();
+  }
+  let lastLogLines = '';
+
+  async function loadDevices() {
+    const list = await api('/api/devices');
+    const sel = $('sink'); const cur = sel.value;
+    sel.innerHTML = '<option value="none">none (graph only)</option>';
+    for (const d of list) {
+      if (!d.ff) continue;
+      const o = document.createElement('option'); o.value = d.path;
+      o.textContent = `${d.name}${d.virtual ? ' [virtual]' : ''} (${d.path.replace('/dev/input/', '')}, ${d.effects.join(' ')})`;
+      sel.appendChild(o);
+    }
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    if (list.length === 0) logLine('no input devices visible (check access to /dev/input/event*)');
+  }
+  async function loadRecordings() {
+    const list = await api('/api/recordings');
+    const sel = $('recList'); const cur = sel.value; sel.innerHTML = '';
+    for (const r of list) { const o = document.createElement('option'); o.value = r.path; o.textContent = `${r.name} (${(r.bytes / 1024).toFixed(0)} KB)`; sel.appendChild(o); }
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    showRecordingDetails();
+  }
+  async function showRecordingDetails() {
+    const file = $('recList').value; const el = $('recDetails');
+    if (!file) { el.textContent = 'no recordings yet'; return; }
+    try {
+      const i = await api(`/api/recording?file=${encodeURIComponent(file)}`);
+      el.textContent = `${i.duration_s.toFixed(1)} s, ${i.events} events (${i.effect_types.join(', ') || 'none'}), peak ${i.peak_force.toFixed(2)}, mean |f| ${i.mean_abs_force.toFixed(2)}, clipped ${(i.clipped_fraction * 100).toFixed(1)}%. From ${i.source || '?'}${i.notes ? ' - ' + i.notes : ''}`;
+    } catch (e) { el.textContent = ''; }
+  }
+
+  $('btnLive').onclick = () => api('/api/live', { source: $('source').value, sink: $('sink').value, grab: $('grab').checked }).then(() => clearData()).catch(() => {});
+  $('btnStop').onclick = $('btnPlayStop').onclick = () => api('/api/stop', {}).then(loadRecordings).catch(() => {});
+  $('btnRec').onclick = () => api('/api/record/start', { name: $('recName').value, notes: $('recNotes').value }).catch(() => {});
+  $('btnRecStop').onclick = () => api('/api/record/stop', {}).then(loadRecordings).catch(() => {});
+  $('btnPulse').onclick = () => api('/api/pulse', { magnitude: parseFloat($('pulseMag').value), ms: parseInt($('pulseMs').value, 10) }).catch(() => {});
+  $('btnReset').onclick = () => api('/api/reset', {}).catch(() => {});
+  $('btnDevices').onclick = () => loadDevices().catch(() => {});
+  $('btnRecordings').onclick = () => loadRecordings().catch(() => {});
+  $('recList').onchange = showRecordingDetails;
+  $('btnPlay').onclick = () => api('/api/play', { file: $('recList').value, sink: $('sink').value, speed: parseFloat($('speed').value), loop: $('loop').checked, grab: $('grab').checked }).then(() => clearData()).catch(() => {});
+  let paused = false;
+  $('btnPause').onclick = () => api('/api/pause', { paused: !paused }).catch(() => {});
+  $('window').onchange = draw;
+
+  // ---- stream -----------------------------------------------------------
+  function connect() {
+    const es = new EventSource(`/api/stream?since=${seq}`);
+    es.onopen = () => { $('conn').textContent = 'connected'; $('conn').className = 'badge live'; };
+    es.onerror = () => { $('conn').textContent = 'reconnecting'; $('conn').className = 'badge rec'; };
+    es.addEventListener('samples', e => {
+      const m = JSON.parse(e.data); seq = m.seq;
+      for (const s of m.s) push(s);
+      if ($('follow').checked) draw();
+    });
+    es.addEventListener('status', e => applyStatus(JSON.parse(e.data)));
+  }
+  function applyStatus(st) {
+    const mode = $('mode');
+    if (st.mode === 'live' && st.recording) { mode.textContent = 'recording'; mode.className = 'badge rec'; }
+    else if (st.mode === 'live') { mode.textContent = 'live'; mode.className = 'badge live'; }
+    else if (st.mode === 'playback') { mode.textContent = st.paused ? 'paused' : 'playing'; mode.className = 'badge play'; }
+    else { mode.textContent = 'idle'; mode.className = 'badge'; }
+    paused = !!st.paused;
+    $('btnPause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+    $('btnPause').disabled = st.mode !== 'playback';
+    $('btnRec').disabled = st.mode !== 'live' || !!st.recording;
+    $('btnRecStop').disabled = !st.recording;
+    $('btnLive').disabled = st.mode !== 'idle'; $('btnPlay').disabled = st.mode !== 'idle';
+    $('pipe').textContent = st.mode === 'idle' ? '' : `${st.source} → ${st.sink}`;
+    $('recInfo').textContent = st.recording ? `${st.recording_s.toFixed(1)} s → ${st.recording}` : '';
+    if (st.mode === 'playback' && st.duration_s) {
+      $('playInfo').textContent = `${st.position_s.toFixed(1)} / ${st.duration_s.toFixed(1)} s${st.loop ? ' (loop)' : ''}`;
+      $('progress').style.width = `${Math.min(100, 100 * st.position_s / st.duration_s)}%`;
+    } else { $('playInfo').textContent = ''; $('progress').style.width = '0'; }
+    $('sForce').textContent = st.force === undefined ? '-' : st.force.toFixed(3);
+    $('sAxis').textContent = st.axis === null || st.axis === undefined ? '-' : st.axis.toFixed(3);
+    $('sEvents').textContent = st.events_total ?? 0;
+    const now = performance.now();
+    if (lastEventsT) { const dt = (now - lastEventsT) / 1000; if (dt > 0) eventRate = 0.7 * eventRate + 0.3 * ((st.events_total - lastEventsTotal) / dt); }
+    lastEventsTotal = st.events_total || 0; lastEventsT = now;
+    $('sRate').textContent = st.mode === 'idle' ? '0' : eventRate.toFixed(0);
+    $('sPlaying').textContent = `${st.playing ?? 0} / ${st.loaded ?? 0}`;
+    $('sGain').textContent = st.gain === undefined ? '-' : st.gain.toFixed(2);
+    $('sTick').textContent = `${st.tick_hz} Hz`;
+    $('sLate').textContent = st.late_ticks ?? 0;
+    $('sErrors').textContent = st.sink_errors ?? 0;
+    $('sTime').textContent = st.t_s === undefined ? '-' : `${st.t_s.toFixed(1)} s`;
+    // Log: the server keeps the authoritative list; replace when it changed.
+    const lines = (st.log || []).map(l => l.line).join('\n');
+    if (lines !== lastLogLines) {
+      lastLogLines = lines; const el = $('log'); el.innerHTML = '';
+      for (const l of st.log) { const d = document.createElement('div'); d.textContent = l.line; if (/error|failed|cannot|could not/i.test(l.line)) d.className = 'err'; el.appendChild(d); }
+    }
+  }
+
+  loadDevices().catch(() => {});
+  loadRecordings().catch(() => {});
+  connect();
+  draw();
+})();
+</script>
+</body>
+</html>
